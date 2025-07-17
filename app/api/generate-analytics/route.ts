@@ -40,23 +40,21 @@ export async function POST(request: Request) {
       resolvedWalletAddress = rawInput.toLowerCase()
       try {
         displayEnsName = await alchemyEth.core.lookupAddress(resolvedWalletAddress)
-      } catch (_) {} // non-fatal
+      } catch (_) {
+        // Non-fatal: ENS lookup might fail even for valid addresses
+      }
     } else if (plainHexRegex.test(rawInput)) {
       // Missing 0x prefix
       resolvedWalletAddress = `0x${rawInput.toLowerCase()}`
       try {
         displayEnsName = await alchemyEth.core.lookupAddress(resolvedWalletAddress)
-      } catch (_) {}
+      } catch (_) {
+        // Non-fatal
+      }
     } else {
-      // Treat as ENS – try both resolution methods
+      // Treat as ENS – try resolution
       try {
-        resolvedWalletAddress =
-          (await alchemyEth.core.resolveName(rawInput)) ||
-          // Alchemy helper (some SDK versions expose this)
-          // @ts-ignore – only exists in recent alchemy-sdk
-          (await (alchemyEth.core as any).resolveEnsAddress?.(rawInput)) ||
-          null
-
+        resolvedWalletAddress = await alchemyEth.core.resolveName(rawInput)
         if (resolvedWalletAddress) displayEnsName = rawInput.toLowerCase()
       } catch (e) {
         console.warn("ENS resolution failed:", e)
@@ -64,14 +62,17 @@ export async function POST(request: Request) {
     }
 
     if (!resolvedWalletAddress) {
+      console.error("Invalid wallet address or unresolvable ENS name:", rawInput)
       return NextResponse.json(
         { error: "Invalid wallet address or unresolvable ENS name. Please check your input." },
         { status: 400 },
       )
     }
+    console.log("Resolved Wallet Address:", resolvedWalletAddress)
+    console.log("Display ENS Name:", displayEnsName)
 
     /* ------------------------------------------------------------------ */
-    /* Data Collection for AI Input and Charts (using resolvedWalletAddress) */
+    /* Data Collection for AI Input and Analytics                         */
     /* ------------------------------------------------------------------ */
 
     let walletAgeDays = 0
@@ -79,11 +80,38 @@ export async function POST(request: Request) {
     let gasSpentEth = 0.0
     let baseTransactions = 0
     let baseLaunchParticipant = false
-    let notableBaseNft = "N/A"
+    let notableBaseNft = "a unique digital artifact"
 
-    const allTransfers: { blockNum: string; to: string | null; value: number | null; asset: string | null }[] = []
-    const contractInteractions: { [key: string]: number } = {}
-    const transactionCountsByMonth: { [monthYear: string]: number } = {}
+    const transactionCountsByMonth: { [key: string]: number } = {}
+    const contractInteractions: { [key: string]: number } = {} // Combined for top dApps
+
+    const now = Date.now()
+    const oneYearAgo = new Date()
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+    // Helper to add transaction to counts and interactions
+    const processTransaction = async (tx: any, alchemyClient: Alchemy) => {
+      totalTransactions++
+      if (tx.to) {
+        contractInteractions[tx.to] = (contractInteractions[tx.to] || 0) + 1
+      }
+      try {
+        const block = await alchemyClient.core.getBlock(tx.blockNum)
+        if (block) {
+          const txDate = new Date(Number.parseInt(block.timestamp, 16) * 1000)
+          if (txDate.getTime() >= oneYearAgo.getTime()) {
+            const monthYear = txDate.toLocaleString("en-US", { month: "short", year: "numeric" })
+            transactionCountsByMonth[monthYear] = (transactionCountsByMonth[monthYear] || 0) + 1
+          }
+          // For wallet age, only consider the earliest transaction found
+          if (walletAgeDays === 0 || (Date.now() - txDate.getTime()) / (1000 * 60 * 60 * 24) > walletAgeDays) {
+            walletAgeDays = Math.floor((Date.now() - txDate.getTime()) / (1000 * 60 * 60 * 24))
+          }
+        }
+      } catch (blockError) {
+        console.warn("Could not get block timestamp for transaction:", tx.blockNum, blockError)
+      }
+    }
 
     // Fetch Ethereum Mainnet transfers
     try {
@@ -94,37 +122,10 @@ export async function POST(request: Request) {
         order: "desc",
         maxCount: 10000,
       })
-      totalTransactions += ethTransfers.transfers.length
-      allTransfers.push(
-        ...ethTransfers.transfers.map((t) => ({ blockNum: t.blockNum, to: t.to, value: t.value, asset: t.asset })),
-      )
-
+      console.log("Fetched ETH Transfers Count:", ethTransfers.transfers.length)
+      // console.log("Sample ETH Transfer:", ethTransfers.transfers[0]); // UNCOMMENT FOR MORE DETAIL IF NEEDED
       for (const tx of ethTransfers.transfers) {
-        if (tx.to) {
-          contractInteractions[tx.to] = (contractInteractions[tx.to] || 0) + 1
-        }
-        if (tx.value && tx.asset === "ETH") {
-          gasSpentEth += tx.value // This is a simplification; actual gas calculation is more complex
-        }
-        try {
-          const block = await alchemyEth.core.getBlock(tx.blockNum)
-          if (block) {
-            const date = new Date(Number.parseInt(block.timestamp, 16) * 1000)
-            const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}`
-            transactionCountsByMonth[monthYear] = (transactionCountsByMonth[monthYear] || 0) + 1
-          }
-        } catch (blockError) {
-          console.warn("Error fetching block for ETH transaction history:", blockError)
-        }
-      }
-
-      if (ethTransfers.transfers.length > 0) {
-        const earliestTx = ethTransfers.transfers[ethTransfers.transfers.length - 1]
-        const block = await alchemyEth.core.getBlock(earliestTx.blockNum)
-        if (block) {
-          const firstTxDate = new Date(Number.parseInt(block.timestamp, 16) * 1000)
-          walletAgeDays = Math.floor((Date.now() - firstTxDate.getTime()) / (1000 * 60 * 60 * 24))
-        }
+        await processTransaction(tx, alchemyEth)
       }
     } catch (e) {
       console.warn("Error fetching Ethereum transfers:", e)
@@ -140,10 +141,11 @@ export async function POST(request: Request) {
         maxCount: 10000,
       })
       baseTransactions = baseTransfers.transfers.length
-      totalTransactions += baseTransactions
-      allTransfers.push(
-        ...baseTransfers.transfers.map((t) => ({ blockNum: t.blockNum, to: t.to, value: t.value, asset: t.asset })),
-      )
+      console.log("Fetched Base Transfers Count:", baseTransfers.transfers.length)
+      // console.log("Sample Base Transfer:", baseTransfers.transfers[0]); // UNCOMMENT FOR MORE DETAIL IF NEEDED
+      for (const tx of baseTransfers.transfers) {
+        await processTransaction(tx, alchemyBase)
+      }
 
       const baseLaunchDate = new Date("2023-08-09T00:00:00Z").getTime()
       if (baseTransfers.transfers.length > 0) {
@@ -151,34 +153,14 @@ export async function POST(request: Request) {
         const block = await alchemyBase.core.getBlock(earliestBaseTx.blockNum)
         if (block) {
           const firstBaseTxDate = new Date(Number.parseInt(block.timestamp, 16) * 1000).getTime()
-          if (firstBaseTxDate - baseLaunchDate < 30 * 24 * 60 * 60 * 1000) {
+          if (firstBaseTxDate >= baseLaunchDate && firstBaseTxDate - baseLaunchDate < 30 * 24 * 60 * 60 * 1000) {
             baseLaunchParticipant = true
           }
-          const date = new Date(Number.parseInt(block.timestamp, 16) * 1000)
-          const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}`
-          transactionCountsByMonth[monthYear] = (transactionCountsByMonth[monthYear] || 0) + 1
-        }
-      }
-
-      for (const tx of baseTransfers.transfers) {
-        if (tx.to) {
-          contractInteractions[tx.to] = (contractInteractions[tx.to] || 0) + 1
         }
       }
     } catch (e) {
       console.warn("Error fetching Base transfers (may be unsupported):", e)
     }
-
-    // Sort transaction history by date
-    const sortedTransactionHistory = Object.entries(transactionCountsByMonth)
-      .map(([date, transactions]) => ({ date, transactions }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-    // Get top DApp interactions
-    const sortedDapps = Object.entries(contractInteractions)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5) // Get top 5 dApps
-      .map(([address, count]) => ({ name: address.slice(0, 6) + "...", value: count }))
 
     // Fetch NFTs owned on Base
     try {
@@ -190,52 +172,75 @@ export async function POST(request: Request) {
       console.warn("Error fetching Base NFTs (may be unsupported):", e)
     }
 
-    // Fetch NFTs owned on Ethereum (for a more complete picture)
+    // Fetch NFTs owned on Ethereum (as a fallback if no Base NFTs)
     try {
       const ethNfts = await alchemyEth.nft.getNftsForOwner(resolvedWalletAddress)
-      if (ethNfts.ownedNfts.length > 0 && notableBaseNft === "N/A") {
+      if (ethNfts.ownedNfts.length > 0 && notableBaseNft === "a unique digital artifact") {
         notableBaseNft = ethNfts.ownedNfts[0]?.title || ethNfts.ownedNfts[0]?.contract?.name || "a notable NFT"
       }
     } catch (e) {
       console.warn("Error fetching Ethereum NFTs:", e)
     }
 
-    const aiInputData = {
+    // Estimate gas spent (very rough estimate, actual gas calculation is complex)
+    gasSpentEth = Number.parseFloat((totalTransactions * 0.0001).toFixed(4))
+
+    // Prepare transaction history for chart (last 12 months)
+    const formattedTransactionHistory: { month: string; count: number }[] = []
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date(now)
+      date.setMonth(date.getMonth() - i)
+      const monthYear = date.toLocaleString("en-US", { month: "short", year: "numeric" })
+      formattedTransactionHistory.push({
+        month: monthYear,
+        count: transactionCountsByMonth[monthYear] || 0,
+      })
+    }
+    console.log("Transaction Counts By Month (Raw):", transactionCountsByMonth)
+    console.log("Formatted Transaction History:", formattedTransactionHistory)
+
+    // Prepare top DApp interactions for chart (top 5)
+    const sortedDapps = Object.entries(contractInteractions)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5)
+      .map(([address, count]) => ({
+        name: address.slice(0, 6) + "...", // Shorten address for display
+        value: count,
+      }))
+    console.log("Contract Interactions (Raw):", contractInteractions)
+    console.log("Sorted DApps:", sortedDapps)
+
+    const walletOverview = {
       walletAgeDays: walletAgeDays.toString(),
       totalTransactions: totalTransactions.toString(),
       gasSpentEth: gasSpentEth.toFixed(4),
-      baseLaunchParticipant: baseLaunchParticipant,
       baseTransactions: baseTransactions.toString(),
-      topDapps: sortedDapps.map((d) => `${d.name} (${d.value} interactions)`).join(", "),
+      baseLaunchParticipant: baseLaunchParticipant,
       notableBaseNft: notableBaseNft,
     }
+    console.log("Wallet Overview Data:", walletOverview)
 
     /* ------------------------------------------------------------------ */
     /* Generate Key Insights with AI SDK                                  */
     /* ------------------------------------------------------------------ */
-    const { text: generatedInsights } = await generateText({
+    console.log("AI Prompt for Key Insights:", JSON.stringify(walletOverview))
+    const { text: keyInsights } = await generateText({
       model: google("models/gemini-1.5-pro-latest"),
-      prompt: JSON.stringify(aiInputData),
-      system: `You are an Onchain Analytics AI, providing concise and insightful summaries of a wallet's activity. Your goal is to highlight key aspects of their journey based on the provided JSON data.
-Tone: Informative, analytical, and clear. Avoid overly poetic language.
-Your task is to generate a two-paragraph summary of the wallet's onchain activity.
+      prompt: JSON.stringify(walletOverview),
+      system: `You are an Onchain Analytics AI, providing key insights into a wallet's activity.
+Tone: Professional, analytical, and concise. Focus on summarizing the data.
+Your task is to generate a two-paragraph summary of the provided JSON wallet overview data.
 
-Paragraph 1 (Overall Activity): Summarize the wallet's general activity, including its age (walletAgeDays), total transactions (totalTransactions), and estimated gas spent (gasSpentEth). Mention their engagement with top dApps (topDapps).
-Paragraph 2 (Base Network Focus): Detail their activity on the Base network, including baseTransactions, whether they were a baseLaunchParticipant, and any notable NFTs (notableBaseNft).`,
+Paragraph 1 (Overall Activity): Summarize the wallet's general activity, including its age, total transactions, and estimated gas spent. Highlight any significant numbers.
+Paragraph 2 (Base Network Focus): Detail the wallet's engagement with the Base network, mentioning Base-specific transactions, participation in the Base launch (if applicable), and any notable NFTs.`,
     })
+    console.log("AI Generated Key Insights:", keyInsights)
 
     return NextResponse.json({
       ensName: displayEnsName ?? `${resolvedWalletAddress.slice(0, 6)}...${resolvedWalletAddress.slice(-4)}`,
-      keyInsights: generatedInsights,
-      walletOverview: {
-        walletAgeDays,
-        totalTransactions,
-        gasSpentEth,
-        baseLaunchParticipant,
-        baseTransactions,
-        notableBaseNft,
-      },
-      transactionHistory: sortedTransactionHistory,
+      keyInsights: keyInsights,
+      walletOverview: walletOverview,
+      transactionHistory: formattedTransactionHistory,
       topDappInteractions: sortedDapps,
     })
   } catch (err) {
