@@ -17,6 +17,19 @@ export default function OnchainStoryPage() {
   )
   const [transactionHash, setTransactionHash] = useState("0x123abc...")
 
+  // Validation function for wallet address or ENS name
+  const isValidInput = (input: string) => {
+    const trimmedInput = input.trim()
+    // Regex for a 40-character hex string (address without 0x)
+    const plainHexRegex = /^[a-fA-F0-9]{40}$/
+    // Regex for a 0x-prefixed 42-character hex string (full address)
+    const hexRegex = /^0x[a-fA-F0-9]{40}$/
+    // Simple check for ENS name (contains a dot)
+    const ensRegex = /\.eth$|\.xyz$|\.luxe$|\.kred$|\.art$|\.nft$|\.crypto$|\.dao$|\.blockchain$/i // Common ENS suffixes
+
+    return hexRegex.test(trimmedInput) || plainHexRegex.test(trimmedInput) || ensRegex.test(trimmedInput)
+  }
+
   const handleGenerateStory = async () => {
     setAppState("loading")
     try {
@@ -92,9 +105,9 @@ export default function OnchainStoryPage() {
               />
               <Button
                 className="relative overflow-hidden rounded-full bg-blue-600 px-8 py-3 text-lg font-semibold text-white shadow-blue-600/50 transition-all duration-300 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900
-               before:absolute before:inset-0 before:animate-pulse-shadow before:rounded-full before:bg-blue-600/50 before:blur-lg before:content-['']"
+             before:absolute before:inset-0 before:animate-pulse-shadow before:rounded-full before:bg-blue-600/50 before:blur-lg before:content-['']"
                 onClick={handleGenerateStory}
-                disabled={!userInput.trim()}
+                disabled={!isValidInput(userInput)} // Updated disabled prop
               >
                 Generate Story
               </Button>
