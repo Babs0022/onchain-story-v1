@@ -4,7 +4,7 @@ import { generateText } from "ai"
 import { google } from "@ai-sdk/google"
 
 /**
- * POST /api/generate-story
+ * POST /api/generate-analytics
  * Request body: { walletAddress: string }
  */
 export async function POST(request: Request) {
@@ -71,22 +71,19 @@ export async function POST(request: Request) {
     }
 
     /* ------------------------------------------------------------------ */
-    /* Data Collection for AI Input (using resolvedWalletAddress)         */
+    /* Data Collection for AI Input and Charts (using resolvedWalletAddress) */
     /* ------------------------------------------------------------------ */
 
     let walletAgeDays = 0
     let totalTransactions = 0
-    let activityPeak = "various periods of innovation"
-    let mainnetQuest = "exploring decentralized finance and digital collectibles"
     let gasSpentEth = 0.0
     let baseTransactions = 0
     let baseLaunchParticipant = false
-    let topBaseDapp = "various emerging protocols"
-    let notableBaseNft = "a unique digital artifact"
+    let notableBaseNft = "N/A"
 
-    const allTransfers: { blockNum: string; to: string | null }[] = []
-    const contractInteractionsEth: { [key: string]: number } = {}
-    const contractInteractionsBase: { [key: string]: number } = {}
+    const allTransfers: { blockNum: string; to: string | null; value: number | null; asset: string | null }[] = []
+    const contractInteractions: { [key: string]: number } = {}
+    const transactionCountsByMonth: { [monthYear: string]: number } = {}
 
     // Fetch Ethereum Mainnet transfers
     try {
@@ -98,11 +95,26 @@ export async function POST(request: Request) {
         maxCount: 10000,
       })
       totalTransactions += ethTransfers.transfers.length
-      allTransfers.push(...ethTransfers.transfers.map((t) => ({ blockNum: t.blockNum, to: t.to })))
+      allTransfers.push(
+        ...ethTransfers.transfers.map((t) => ({ blockNum: t.blockNum, to: t.to, value: t.value, asset: t.asset })),
+      )
 
       for (const tx of ethTransfers.transfers) {
         if (tx.to) {
-          contractInteractionsEth[tx.to] = (contractInteractionsEth[tx.to] || 0) + 1
+          contractInteractions[tx.to] = (contractInteractions[tx.to] || 0) + 1
+        }
+        if (tx.value && tx.asset === "ETH") {
+          gasSpentEth += tx.value // This is a simplification; actual gas calculation is more complex
+        }
+        try {
+          const block = await alchemyEth.core.getBlock(tx.blockNum)
+          if (block) {
+            const date = new Date(Number.parseInt(block.timestamp, 16) * 1000)
+            const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}`
+            transactionCountsByMonth[monthYear] = (transactionCountsByMonth[monthYear] || 0) + 1
+          }
+        } catch (blockError) {
+          console.warn("Error fetching block for ETH transaction history:", blockError)
         }
       }
 
@@ -129,7 +141,9 @@ export async function POST(request: Request) {
       })
       baseTransactions = baseTransfers.transfers.length
       totalTransactions += baseTransactions
-      allTransfers.push(...baseTransfers.transfers.map((t) => ({ blockNum: t.blockNum, to: t.to })))
+      allTransfers.push(
+        ...baseTransfers.transfers.map((t) => ({ blockNum: t.blockNum, to: t.to, value: t.value, asset: t.asset })),
+      )
 
       const baseLaunchDate = new Date("2023-08-09T00:00:00Z").getTime()
       if (baseTransfers.transfers.length > 0) {
@@ -140,57 +154,31 @@ export async function POST(request: Request) {
           if (firstBaseTxDate - baseLaunchDate < 30 * 24 * 60 * 60 * 1000) {
             baseLaunchParticipant = true
           }
+          const date = new Date(Number.parseInt(block.timestamp, 16) * 1000)
+          const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}`
+          transactionCountsByMonth[monthYear] = (transactionCountsByMonth[monthYear] || 0) + 1
         }
       }
 
       for (const tx of baseTransfers.transfers) {
         if (tx.to) {
-          contractInteractionsBase[tx.to] = (contractInteractionsBase[tx.to] || 0) + 1
+          contractInteractions[tx.to] = (contractInteractions[tx.to] || 0) + 1
         }
       }
     } catch (e) {
       console.warn("Error fetching Base transfers (may be unsupported):", e)
     }
 
-    // Determine activity peak
-    if (allTransfers.length > 0) {
-      const blockTimestamps: { [year: string]: number } = {}
-      for (const tx of allTransfers) {
-        try {
-          const block = await alchemyEth.core.getBlock(tx.blockNum)
-          if (block) {
-            const year = new Date(Number.parseInt(block.timestamp, 16) * 1000).getFullYear().toString()
-            blockTimestamps[year] = (blockTimestamps[year] || 0) + 1
-          }
-        } catch (blockError) {
-          try {
-            const block = await alchemyBase.core.getBlock(tx.blockNum)
-            if (block) {
-              const year = new Date(Number.parseInt(block.timestamp, 16) * 1000).getFullYear().toString()
-              blockTimestamps[year] = (blockTimestamps[year] || 0) + 1
-            }
-          } catch (e) {
-            console.warn("Could not get block timestamp for activity peak:", e)
-          }
-        }
-      }
-      const sortedYears = Object.entries(blockTimestamps).sort(([, a], [, b]) => b - a)
-      if (sortedYears.length > 0) {
-        activityPeak = `the year ${sortedYears[0][0]}`
-      }
-    }
+    // Sort transaction history by date
+    const sortedTransactionHistory = Object.entries(transactionCountsByMonth)
+      .map(([date, transactions]) => ({ date, transactions }))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-    // Determine mainnet quest
-    const sortedEthDapps = Object.entries(contractInteractionsEth).sort(([, a], [, b]) => b - a)
-    if (sortedEthDapps.length > 0) {
-      mainnetQuest = `interacting with key protocols like ${sortedEthDapps[0][0].substring(0, 6)}... on Ethereum Mainnet`
-    }
-
-    // Determine top Base dApp
-    const sortedBaseDapps = Object.entries(contractInteractionsBase).sort(([, a], [, b]) => b - a)
-    if (sortedBaseDapps.length > 0) {
-      topBaseDapp = `a prominent dApp like ${sortedBaseDapps[0][0].substring(0, 6)}... on Base`
-    }
+    // Get top DApp interactions
+    const sortedDapps = Object.entries(contractInteractions)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5) // Get top 5 dApps
+      .map(([address, count]) => ({ name: address.slice(0, 6) + "...", value: count }))
 
     // Fetch NFTs owned on Base
     try {
@@ -202,52 +190,56 @@ export async function POST(request: Request) {
       console.warn("Error fetching Base NFTs (may be unsupported):", e)
     }
 
-    // Fetch NFTs owned on Ethereum (for a more complete picture, though story focuses on Base)
+    // Fetch NFTs owned on Ethereum (for a more complete picture)
     try {
       const ethNfts = await alchemyEth.nft.getNftsForOwner(resolvedWalletAddress)
-      if (ethNfts.ownedNfts.length > 0 && notableBaseNft === "a unique digital artifact") {
+      if (ethNfts.ownedNfts.length > 0 && notableBaseNft === "N/A") {
         notableBaseNft = ethNfts.ownedNfts[0]?.title || ethNfts.ownedNfts[0]?.contract?.name || "a notable NFT"
       }
     } catch (e) {
       console.warn("Error fetching Ethereum NFTs:", e)
     }
 
-    // Removed Math.random() from gasSpentEth calculation
-    gasSpentEth = Number.parseFloat((totalTransactions * 0.0001).toFixed(4))
-
     const aiInputData = {
       walletAgeDays: walletAgeDays.toString(),
       totalTransactions: totalTransactions.toString(),
-      activityPeak: activityPeak,
-      mainnetQuest: mainnetQuest,
-      gasSpentEth: gasSpentEth.toFixed(2),
+      gasSpentEth: gasSpentEth.toFixed(4),
       baseLaunchParticipant: baseLaunchParticipant,
       baseTransactions: baseTransactions.toString(),
-      topBaseDapp: topBaseDapp,
+      topDapps: sortedDapps.map((d) => `${d.name} (${d.value} interactions)`).join(", "),
       notableBaseNft: notableBaseNft,
     }
 
     /* ------------------------------------------------------------------ */
-    /* Generate Story with AI SDK                                         */
+    /* Generate Key Insights with AI SDK                                  */
     /* ------------------------------------------------------------------ */
-    const { text: generatedStory } = await generateText({
+    const { text: generatedInsights } = await generateText({
       model: google("models/gemini-1.5-pro-latest"),
       prompt: JSON.stringify(aiInputData),
-      system: `You are a Base Historian, an archivist of the onchain world. Your purpose is to chronicle the epic journeys of its citizens, transforming raw data into a multi-part saga.
-Tone: Insightful, respectful, and epic. You are documenting a legacy. Avoid jargon and focus on the meaning behind the actions.
-Your task is to generate a three-paragraph story based on the provided JSON input data.
+      system: `You are an Onchain Analytics AI, providing concise and insightful summaries of a wallet's activity. Your goal is to highlight key aspects of their journey based on the provided JSON data.
+Tone: Informative, analytical, and clear. Avoid overly poetic language.
+Your task is to generate a two-paragraph summary of the wallet's onchain activity.
 
-Paragraph 1 (The Genesis): Chronicle their origin. Acknowledge their experience using walletAgeDays and activityPeak. Describe their early quests on Mainnet using mainnetQuest.
-Paragraph 2 (The Journey to Base): Detail their arrival on the new frontier. If baseLaunchParticipant is true, celebrate them as a pioneer. Describe their primary activity on the new network using topBaseDapp, notableBaseNft, and baseTransactions.
-Paragraph 3 (The Legacy): Conclude with their overall impact. Summarize their entire journey, combining their total totalTransactions and gasSpentEth as a testament to their long-term commitment to the onchain world.`,
+Paragraph 1 (Overall Activity): Summarize the wallet's general activity, including its age (walletAgeDays), total transactions (totalTransactions), and estimated gas spent (gasSpentEth). Mention their engagement with top dApps (topDapps).
+Paragraph 2 (Base Network Focus): Detail their activity on the Base network, including baseTransactions, whether they were a baseLaunchParticipant, and any notable NFTs (notableBaseNft).`,
     })
 
     return NextResponse.json({
       ensName: displayEnsName ?? `${resolvedWalletAddress.slice(0, 6)}...${resolvedWalletAddress.slice(-4)}`,
-      storyText: generatedStory,
+      keyInsights: generatedInsights,
+      walletOverview: {
+        walletAgeDays,
+        totalTransactions,
+        gasSpentEth,
+        baseLaunchParticipant,
+        baseTransactions,
+        notableBaseNft,
+      },
+      transactionHistory: sortedTransactionHistory,
+      topDappInteractions: sortedDapps,
     })
   } catch (err) {
-    console.error("generate-story error:", err)
-    return NextResponse.json({ error: "Failed to generate story: " + (err as Error).message }, { status: 500 })
+    console.error("generate-analytics error:", err)
+    return NextResponse.json({ error: "Failed to generate analytics: " + (err as Error).message }, { status: 500 })
   }
 }
