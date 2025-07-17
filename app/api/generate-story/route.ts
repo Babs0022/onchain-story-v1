@@ -15,8 +15,10 @@ export async function POST(request: Request) {
     const alchemyApiKey = process.env.ALCHEMY_API_KEY
     if (!alchemyApiKey) return NextResponse.json({ error: "Missing ALCHEMY_API_KEY" }, { status: 500 })
 
-    const googleApiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    if (!googleApiKey) return NextResponse.json({ error: "Missing GOOGLE_GENERATIVE_AI_API_KEY" }, { status: 500 })
+    const googleApiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    if (!googleApiKey) {
+      return NextResponse.json({ error: "Missing GOOGLE_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY)" }, { status: 500 })
+    }
 
     /* ------------------------------------------------------------------ */
     /* Initialise Alchemy clients                                         */
@@ -27,25 +29,37 @@ export async function POST(request: Request) {
     let resolvedWalletAddress: string | null = null
     let displayEnsName: string | null = null
 
-    // Determine if input is an ENS name or a wallet address and resolve accordingly
-    if (rawInput.startsWith("0x") && rawInput.length === 42) {
-      // Basic check for Ethereum address format
-      resolvedWalletAddress = rawInput
+    /* ------------------------------------------------------------------ */
+    /* Resolve ENS ↔ Address                                              */
+    /* ------------------------------------------------------------------ */
+    const hexRegex = /^0x[a-fA-F0-9]{40}$/
+    const plainHexRegex = /^[a-fA-F0-9]{40}$/ // address without 0x
+
+    if (hexRegex.test(rawInput)) {
+      // Already a checksummed / lowercase hex address
+      resolvedWalletAddress = rawInput.toLowerCase()
       try {
-        // If it's an address, try to look up its ENS name for display
-        displayEnsName = await alchemyEth.core.lookupAddress(rawInput)
-      } catch (e) {
-        console.warn("ENS lookup for address failed:", e)
-      }
+        displayEnsName = await alchemyEth.core.lookupAddress(resolvedWalletAddress)
+      } catch (_) {} // non-fatal
+    } else if (plainHexRegex.test(rawInput)) {
+      // Missing 0x prefix
+      resolvedWalletAddress = `0x${rawInput.toLowerCase()}`
+      try {
+        displayEnsName = await alchemyEth.core.lookupAddress(resolvedWalletAddress)
+      } catch (_) {}
     } else {
-      // Assume it's an ENS name, try to resolve it to an address
+      // Treat as ENS – try both resolution methods
       try {
-        resolvedWalletAddress = await alchemyEth.core.resolveEnsAddress(rawInput)
-        if (resolvedWalletAddress) {
-          displayEnsName = rawInput // Use the input ENS name for display
-        }
+        resolvedWalletAddress =
+          (await alchemyEth.core.resolveName(rawInput)) ||
+          // Alchemy helper (some SDK versions expose this)
+          // @ts-ignore – only exists in recent alchemy-sdk
+          (await (alchemyEth.core as any).resolveEnsAddress?.(rawInput)) ||
+          null
+
+        if (resolvedWalletAddress) displayEnsName = rawInput.toLowerCase()
       } catch (e) {
-        console.warn("ENS resolution failed for input:", rawInput, e)
+        console.warn("ENS resolution failed:", e)
       }
     }
 
@@ -216,7 +230,7 @@ export async function POST(request: Request) {
     /* Generate Story with AI SDK                                         */
     /* ------------------------------------------------------------------ */
     const { text: generatedStory } = await generateText({
-      model: google("gemini-1.5-pro"),
+      model: google("models/gemini-1.5-pro-latest"),
       prompt: JSON.stringify(aiInputData),
       system: `You are a Base Historian, an archivist of the onchain world. Your purpose is to chronicle the epic journeys of its citizens, transforming raw data into a multi-part saga.
 Tone: Insightful, respectful, and epic. You are documenting a legacy. Avoid jargon and focus on the meaning behind the actions.

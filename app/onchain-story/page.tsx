@@ -6,54 +6,56 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Loader2 } from "lucide-react"
+import { toast } from "@/hooks/use-toast"
 
 export default function OnchainStoryPage() {
-  const [appState, setAppState] = useState("initial") // 'initial', 'loading', 'story', 'success'
-  const [walletAddress, setWalletAddress] = useState("")
-  const [ensName, setEnsName] = useState("v0.eth") // Placeholder
+  const [appState, setAppState] = useState<"initial" | "loading" | "story" | "success">("initial")
+  const [userInput, setUserInput] = useState("") // ENS or address
+  const [ensName, setEnsName] = useState("v0.eth")
   const [storyText, setStoryText] = useState(
     "Your journey onchain began with a single transaction, a digital footprint in the vast expanse of the blockchain. From your first NFT mint to your latest DeFi interaction, every move has woven a unique narrative. You've explored new protocols, collected rare digital artifacts, and contributed to decentralized communities, shaping your identity in the web3 universe.",
-  ) // Placeholder
-  const [transactionHash, setTransactionHash] = useState("0x123abc...") // Placeholder
+  )
+  const [transactionHash, setTransactionHash] = useState("0x123abc...")
 
   const handleGenerateStory = async () => {
     setAppState("loading")
     try {
       const response = await fetch("/api/generate-story", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ walletAddress }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: userInput.trim() }),
       })
 
       if (!response.ok) {
-        throw new Error("Failed to fetch story")
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || "Failed to fetch story")
       }
 
       const data = await response.json()
       setEnsName(data.ensName)
       setStoryText(data.storyText)
       setAppState("story")
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating story:", error)
-      // Optionally, handle error state in UI
-      setAppState("initial") // Revert to initial state on error
-      alert("Failed to generate story. Please try again.")
+      toast({
+        title: "Story generation failed",
+        description: error.message ?? "Unknown error",
+        variant: "destructive",
+      })
+      setAppState("initial")
     }
   }
 
   const handleMint = () => {
     setAppState("success")
-    // Simulate minting process
     setTimeout(() => {
-      setTransactionHash("0x" + Math.random().toString(16).substring(2, 12)) // Generate a random hash
-    }, 1000) // Simulate 1-second minting time
+      setTransactionHash("0x" + Math.random().toString(16).substring(2, 12))
+    }, 1000)
   }
 
   const handleStartOver = () => {
     setAppState("initial")
-    setWalletAddress("")
+    setUserInput("")
     setEnsName("v0.eth")
     setStoryText(
       "Your journey onchain began with a single transaction, a digital footprint in the vast expanse of the blockchain. From your first NFT mint to your latest DeFi interaction, every move has woven a unique narrative. You've explored new protocols, collected rare digital artifacts, and contributed to decentralized communities, shaping your identity in the web3 universe.",
@@ -77,21 +79,22 @@ export default function OnchainStoryPage() {
           <div className="text-center">
             <h1 className="mb-4 text-5xl font-bold tracking-tight">Your Onchain Story</h1>
             <p className="mb-8 text-lg text-gray-300">
-              Enter your wallet address to generate and mint your web3 journey on Base.
+              Enter your wallet address <span className="hidden sm:inline">or ENS name</span> to generate and mint your
+              web3 journey on Base.
             </p>
             <div className="flex flex-col items-center gap-4">
               <Input
                 type="text"
                 placeholder="Enter wallet address or ENS name"
                 className="w-full max-w-md rounded-lg border border-gray-700 bg-gray-800 p-3 text-lg text-white placeholder:text-gray-500 focus:border-blue-500 focus:ring-blue-500"
-                value={walletAddress}
-                onChange={(e) => setWalletAddress(e.target.value)}
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
               />
               <Button
                 className="relative overflow-hidden rounded-full bg-blue-600 px-8 py-3 text-lg font-semibold text-white shadow-blue-600/50 transition-all duration-300 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900
-                before:absolute before:inset-0 before:animate-pulse-shadow before:rounded-full before:bg-blue-600/50 before:blur-lg before:content-['']"
+               before:absolute before:inset-0 before:animate-pulse-shadow before:rounded-full before:bg-blue-600/50 before:blur-lg before:content-['']"
                 onClick={handleGenerateStory}
-                disabled={!walletAddress.trim()}
+                disabled={!userInput.trim()}
               >
                 Generate Story
               </Button>
@@ -117,7 +120,7 @@ export default function OnchainStoryPage() {
               </Avatar>
               <div className="grid gap-1 text-center sm:text-left">
                 <h2 className="text-3xl font-bold">{ensName}</h2>
-                <p className="text-gray-300">{storyText}</p>
+                <p className="text-gray-300 whitespace-pre-line">{storyText}</p>
                 <a href="#" className="mt-2 text-sm text-blue-400 underline hover:text-blue-300">
                   No PFP? Upload one.
                 </a>
