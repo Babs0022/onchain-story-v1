@@ -9,13 +9,11 @@ import { Loader2 } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 
 export default function OnchainStoryPage() {
-  const [appState, setAppState] = useState<"initial" | "loading" | "story" | "success">("initial")
+  const [appState, setAppState] = useState<"initial" | "loading" | "story" | "minting-unimplemented">("initial")
   const [userInput, setUserInput] = useState("") // ENS or address
-  const [ensName, setEnsName] = useState("v0.eth")
-  const [storyText, setStoryText] = useState(
-    "Your journey onchain began with a single transaction, a digital footprint in the vast expanse of the blockchain. From your first NFT mint to your latest DeFi interaction, every move has woven a unique narrative. You've explored new protocols, collected rare digital artifacts, and contributed to decentralized communities, shaping your identity in the web3 universe.",
-  )
-  const [transactionHash, setTransactionHash] = useState("0x123abc...")
+  const [ensName, setEnsName] = useState("") // No default ENS name
+  const [storyText, setStoryText] = useState("") // No default story text
+  const [transactionHash, setTransactionHash] = useState("") // No default transaction hash
 
   // Validation function for wallet address or ENS name
   const isValidInput = (input: string) => {
@@ -60,20 +58,17 @@ export default function OnchainStoryPage() {
   }
 
   const handleMint = () => {
-    setAppState("success")
-    setTimeout(() => {
-      setTransactionHash("0x" + Math.random().toString(16).substring(2, 12))
-    }, 1000)
+    // This is a placeholder for future minting functionality.
+    // No actual minting or transaction hash generation occurs here.
+    setAppState("minting-unimplemented")
   }
 
   const handleStartOver = () => {
     setAppState("initial")
     setUserInput("")
-    setEnsName("v0.eth")
-    setStoryText(
-      "Your journey onchain began with a single transaction, a digital footprint in the vast expanse of the blockchain. From your first NFT mint to your latest DeFi interaction, every move has woven a unique narrative. You've explored new protocols, collected rare digital artifacts, and contributed to decentralized communities, shaping your identity in the web3 universe.",
-    )
-    setTransactionHash("0x123abc...")
+    setEnsName("")
+    setStoryText("")
+    setTransactionHash("")
   }
 
   return (
@@ -107,7 +102,7 @@ export default function OnchainStoryPage() {
                 className="relative overflow-hidden rounded-full bg-blue-600 px-8 py-3 text-lg font-semibold text-white shadow-blue-600/50 transition-all duration-300 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900
              before:absolute before:inset-0 before:animate-pulse-shadow before:rounded-full before:bg-blue-600/50 before:blur-lg before:content-['']"
                 onClick={handleGenerateStory}
-                disabled={!isValidInput(userInput)} // Updated disabled prop
+                disabled={!isValidInput(userInput)}
               >
                 Generate Story
               </Button>
@@ -128,11 +123,11 @@ export default function OnchainStoryPage() {
               <Avatar className="h-24 w-24 border-2 border-white/30">
                 <AvatarImage src="/placeholder.svg?height=96&width=96" alt="Profile Picture" />
                 <AvatarFallback className="bg-gray-700 text-xl text-white">
-                  {ensName.slice(0, 2).toUpperCase()}
+                  {ensName ? ensName.slice(0, 2).toUpperCase() : "?? "}
                 </AvatarFallback>
               </Avatar>
               <div className="grid gap-1 text-center sm:text-left">
-                <h2 className="text-3xl font-bold">{ensName}</h2>
+                <h2 className="text-3xl font-bold">{ensName || "Your Wallet"}</h2>
                 <p className="text-gray-300 whitespace-pre-line">{storyText}</p>
                 <a href="#" className="mt-2 text-sm text-blue-400 underline hover:text-blue-300">
                   No PFP? Upload one.
@@ -148,20 +143,14 @@ export default function OnchainStoryPage() {
           </div>
         )}
 
-        {appState === "success" && (
-          <div className="grid gap-6 rounded-lg border border-green-500 bg-green-500/10 p-6 text-center">
-            <h2 className="text-3xl font-bold text-green-400">Minted Successfully!</h2>
+        {appState === "minting-unimplemented" && (
+          <div className="grid gap-6 rounded-lg border border-yellow-500 bg-yellow-500/10 p-6 text-center">
+            <h2 className="text-3xl font-bold text-yellow-400">Minting Coming Soon!</h2>
             <p className="text-lg text-gray-300">
-              Your Onchain Story has been successfully minted on Base. Share your unique web3 journey with the world!
+              Your Onchain Story has been generated. The minting functionality is currently under development. Stay
+              tuned!
             </p>
             <div className="flex flex-col items-center gap-4">
-              <Button
-                variant="link"
-                className="text-blue-400 hover:text-blue-300"
-                onClick={() => window.open(`https://basescan.org/tx/${transactionHash}`, "_blank")}
-              >
-                View Transaction
-              </Button>
               <Button variant="ghost" className="text-gray-400 hover:text-gray-200" onClick={handleStartOver}>
                 Start Over
               </Button>

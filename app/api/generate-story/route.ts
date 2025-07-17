@@ -212,7 +212,8 @@ export async function POST(request: Request) {
       console.warn("Error fetching Ethereum NFTs:", e)
     }
 
-    gasSpentEth = Number.parseFloat((totalTransactions * 0.0001 + Math.random() * 0.01).toFixed(4))
+    // Removed Math.random() from gasSpentEth calculation
+    gasSpentEth = Number.parseFloat((totalTransactions * 0.0001).toFixed(4))
 
     const aiInputData = {
       walletAgeDays: walletAgeDays.toString(),
